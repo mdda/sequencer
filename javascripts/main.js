@@ -12,10 +12,6 @@ window.onload = function() {
   mixGain.connect(audioContext.destination);
   mixGain.gain.value = 0;
   
-  if(ev) {
-    ev.init(audioContext);
-  }
-
   var slider = document.getElementById("myRange");
   var delaySlider = document.getElementById("delaySlider");
   var startBtn = document.getElementById("startBtn");
@@ -445,6 +441,10 @@ window.onload = function() {
     clearTimeout(timerID);
 
   }, false);
+
+  if(ev) {
+    ev.init(audioContext);
+  }
 
 };
 
