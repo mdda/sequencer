@@ -32,6 +32,7 @@ var ev = {
     },
     
   get_sampleAsync: f => {
+      console.log("get_sampleAsync : "+f);
       return new Promise( (resolve, reject) => {
           var request = new XMLHttpRequest();
           request.open('GET', "./audio/"+f, true);
@@ -58,8 +59,8 @@ var ev = {
       var kick_reg = ev.kick(kick_reg_ctx);
       
       var kick_new_ctx = new OfflineAudioContext(1,sampleRate*max_length_in_secs,sampleRate);        
-      //var kick_new = ev.kick(kick_new_ctx, [0.2, 0.1]);
-      var kick_new = ev.kick(kick_new_ctx, [0.45, 0.25]);
+      var kick_new = ev.kick(kick_new_ctx, [0.2, 0.1]);
+      //var kick_new = ev.kick(kick_new_ctx, [0.45, 0.25]);
       
       function bufferAsync( ctx ) {
         return ctx.startRendering().then( renderedBuffer => {
@@ -137,8 +138,27 @@ var ev = {
         return tot;
       }
       
+      function evaluate_population(pop) {
+        return Promise.all( pop.map( ind => {
+                var kick_ind_ctx = new OfflineAudioContext(1,sampleRate*max_length_in_secs,sampleRate);        
+                var kick_ind = ev.kick(kick_ind_ctx, ind.params);
+                return bufferAsync( kick_ind_ctx )
+                  //.then( playAsync(0.5) )
+                  .then( toSignature )
+                  .then( toL2error );
+                  
+              }) // End of map
+            )
+            .then( pop_scores => {
+              pop_scores.forEach( (s, i) => {
+                  pop[i].score = s;
+                }); 
+              return pop;
+            });
+      }
       
-      bufferAsync( kick_reg_ctx )
+      
+      return bufferAsync( kick_reg_ctx )
         .then( playAsync(0.0) )
         .then( toSignature )
         .then( sig => {
@@ -163,36 +183,58 @@ var ev = {
             }
             pop.push({ score:undefined, params:params });
           }
+          //pop[0] = { score:undefined, params:[0.2395, 0.09375] };
+          //pop[0] = { score:undefined, params:undefined };
           
           // Now let's evaluate all of them
-          return Promise.all( pop.map( ind => {
-                  var kick_ind_ctx = new OfflineAudioContext(1,sampleRate*max_length_in_secs,sampleRate);        
-                  var kick_ind = ev.kick(kick_ind_ctx, ind.params);
-                  return bufferAsync( kick_ind_ctx )
-                    //.then( playAsync(0.5) )
-                    .then( toSignature )
-                    .then( toL2error );
-                    
-                }) // End of map
-            )
-            .then( pop_scores => {
-              pop_scores.forEach( (s, i) => {
-                  pop[i].score = s;
-                }); 
-                
-              //console.log(pop);
+          return evaluate_population(pop)
+            .then( pop => {
+              console.log("Pop1", pop);
+              
+              //return playBest(pop);
               
               // find best (lowest L2) score in the population
               var best = pop.slice(1).reduce( (acc, ind) => { // don't need to consider first one
                   return (ind.score < acc.score) ? ind : acc;
                 }, pop[0]); // since it's already here...
               
-              console.log(best);
+              console.log("Pop1.best", best);
               
               var kick_ind_ctx = new OfflineAudioContext(1,sampleRate*max_length_in_secs,sampleRate);        
               var kick_ind = ev.kick(kick_ind_ctx, best.params);
               return bufferAsync( kick_ind_ctx )
-                .then( playAsync(1.0) );
+                .then( playAsync(1.0) )
+                .then( _ => {
+                    return {pop:pop, best:best};
+                  });
+            })
+            .then( res => {
+              var pop = res.pop.map( ind => {
+                  //var adj = ind.params.
+                  return {params: [res.best.params[0]+Math.random()*0.2, res.best.params[1]+Math.random()*0.2] };
+                });
+                
+              return evaluate_population(pop)
+                .then( pop => {
+                  console.log("Pop2", pop);
+                  
+                  //return playBest(pop);
+                  
+                  // find best (lowest L2) score in the population
+                  var best = pop.slice(1).reduce( (acc, ind) => { // don't need to consider first one
+                      return (ind.score < acc.score) ? ind : acc;
+                    }, pop[0]); // since it's already here...
+                  
+                  console.log("Pop2.best", best);
+                  
+                  var kick_ind_ctx = new OfflineAudioContext(1,sampleRate*max_length_in_secs,sampleRate);        
+                  var kick_ind = ev.kick(kick_ind_ctx, best.params);
+                  return bufferAsync( kick_ind_ctx )
+                    .then( playAsync(1.5) )
+                    .then( _ => {
+                        return {pop:pop, best:best};
+                      });
+                });
             })
             ;  
             
@@ -211,8 +253,8 @@ var ev = {
       return params[i]*v1+v0;
     }
     
-    var o1f = param(0, 5,480, 120);
-    var o2f = param(1, 5,480, 50);
+    var o1f = param(0, 5,480, 120); // (120-5)/480.0
+    var o2f = param(1, 5,480, 50);  // (50-5)/480.0
 
     var osc = ac.createOscillator();
     var osc2 = ac.createOscillator();
