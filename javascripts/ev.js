@@ -8,7 +8,7 @@ var ev = {
       function onError() {  }
       
       var cloudBtn = document.getElementById("evBtn1");
-      cloudBtn.addEventListener('click', function(time) {
+      cloudBtn.addEventListener('click', _ => {
           ev.cloud();
         }, false);
         
@@ -17,7 +17,8 @@ var ev = {
         });
 
       var pat = {
-        'kick':{ s:'1000100100000100', c:'pink' }
+        'kick': { s:'1000100100000100', c:'pink' },
+        'snare':{ s:'1000000000000000', c:'lightskyblue' }
       };
       Object.keys(pat).forEach( k => {  
           for(var beat=0; beat<16; beat++) {
@@ -49,26 +50,124 @@ var ev = {
     
   cloud: _ => {
       console.log("Cloud!");
-      //var myOfflineAudio = new OfflineAudioContext(numOfChannels, length, sampleRate);      
-      var myOfflineAudio = new OfflineAudioContext(2,44100*2,44100);   
-     
-      var kick_reg = ev.kick(myOfflineAudio);
-      var kick_mix = ev.kick(myOfflineAudio, [0.2, 0.1]);
+      //var myOfflineAudio = new OfflineAudioContext(numOfChannels, length, sampleRate); 
+      var max_length_in_secs=1.0, sampleRate=44100;
+           
+      var kick_reg_ctx = new OfflineAudioContext(1,sampleRate*max_length_in_secs,sampleRate);        
+      var kick_reg = ev.kick(kick_reg_ctx);
       
-      myOfflineAudio.startRendering().then( renderedBuffer => {
-          console.log('Rendering completed successfully', renderedBuffer.length);
-            
+      var kick_new_ctx = new OfflineAudioContext(1,sampleRate*max_length_in_secs,sampleRate);        
+      var kick_new = ev.kick(kick_new_ctx, [0.2, 0.1]);
+      //var kick_new = ev.kick(kick_new_ctx, [0.45, 0.25]);
+      
+      function bufferAsync( ctx ) {
+        return ctx.startRendering().then( renderedBuffer => {
+            console.log('Rendering completed successfully', renderedBuffer.length);
+            return renderedBuffer;
+          }).catch(function(err) {
+            console.log('Rendering failed: ' + err);
+            // Note: The promise should reject when startRendering is called a second time on an OfflineAudioContext
+          });
+      }
+      //renderAsync( ev.kick(myOfflineAudio, [0.2, 0.1]) ). then 
+
+      function playAsync( offsetTime ) {
+        return  renderedBuffer => {
           var playme = ev.audioContext.createBufferSource();
           playme.buffer = renderedBuffer;
           playme.connect(ev.audioContext.destination);
-          playme.start();
-        }).catch(function(err) {
-            console.log('Rendering failed: ' + err);
-            // Note: The promise should reject when startRendering is called a second time on an OfflineAudioContext
-        });
-        
-      //ev.audioContext( );
+          playme.start(ev.audioContext.currentTime + offsetTime);
+          return renderedBuffer;
+        };
+      }
       
+      // do some kind of FFT analysis
+      var fft_len = 2048; // 44100/20 ~ 2205
+      var fft = new FFT(fft_len, sampleRate);
+
+      function toSignature( renderedBuffer ) {
+        //console.log(renderedBuffer);
+        var data = renderedBuffer.getChannelData(0), data_len=renderedBuffer.length;
+        
+        var spectrum_overall=[];
+        
+        var offset_step = 32;
+        for(var window_offset=0; window_offset+fft_len<data_len; window_offset+=offset_step, offset_step*=2) {
+          fft.forward( data.slice(window_offset, window_offset+fft_len) );
+          var spectrum = fft.spectrum;
+          //console.log(spectrum);
+          
+          var freq_step=1.0;
+          for(var freq=0.0; freq<fft_len/2; freq+=freq_step, freq_step*=1.1) {
+            spectrum_overall.push( spectrum[ freq|0 ] || 0.0 );  // indices need to be integer, some spectrum entries 'undefined'
+          }
+        }
+        
+        // Find absolute max in signature_overall
+        var max=spectrum_overall[0];
+        for(var i=1; i<spectrum_overall.length; i++) {
+          max = (spectrum_overall[i]>max)?spectrum_overall[i]:max;
+        }
+        console.log("spectrum_overall.max="+max);
+        //console.log("spectrum_overall=", spectrum_overall);
+        
+        // in-place normalization of the signature
+        for(var i=0; i<spectrum_overall.length; i++) {
+          spectrum_overall[i] /= max;
+        }
+        
+        return spectrum_overall;
+      }
+      
+      var kick_reg_signature=undefined;
+      
+      bufferAsync( kick_reg_ctx )
+        .then( playAsync(0.0) )
+        .then( toSignature )
+        .then( sig => {
+          console.log(sig.length);
+          kick_reg_signature = sig; 
+          
+          return bufferAsync( kick_new_ctx );
+          //return bufferAsync( kick_reg_ctx );
+        })
+        .then( playAsync(0.5) )
+        .then( toSignature )
+        .then( sig => {
+          //console.log(sig.length);
+          var kick_new_signature = sig; 
+          
+          //return bufferAsync( kick_new_ctx );
+          var tot=0.0;
+          for(var i=0; i<sig.length; i++) {
+            var v=sig[i]-kick_reg_signature[i];
+            tot += v*v;
+          }
+          
+          console.log("Total l2 difference", tot);
+        })
+        ;
+        
+/*        
+        .then( buf => {
+            console.log(buf);
+            var data = buf.getChannelData(0);
+            
+            var spectrum_overall=[];
+            var offset_step = 32;
+            for(var window_offset=0; window_offset+fft_len<buf.length; window_offset+=offset_step, offset_step*=2) {
+              fft.forward( data.slice(window_offset, window_offset+fft_len) );
+              var spectrum = fft.spectrum;
+              //console.log(spectrum);
+              
+              for(var freq=0, freq<fft_len; freq+=freq_step, freq_step*=1.1) {
+                spectrum_overall.push( spectrum[ freq|0 ] );
+              }
+            }
+            return spectrum_overall;
+          });
+*/        
+      //bufferAsync( kick_reg_ctx ).then( playAsync );
     },
     
   kick: (ac, params) => {
