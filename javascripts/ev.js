@@ -49,7 +49,8 @@ var ev = {
     },
     
   cloud: _ => {
-      console.log("Cloud!");
+      //console.log("Cloud!");
+      
       //var myOfflineAudio = new OfflineAudioContext(numOfChannels, length, sampleRate); 
       var max_length_in_secs=1.0, sampleRate=44100;
            
@@ -57,12 +58,12 @@ var ev = {
       var kick_reg = ev.kick(kick_reg_ctx);
       
       var kick_new_ctx = new OfflineAudioContext(1,sampleRate*max_length_in_secs,sampleRate);        
-      var kick_new = ev.kick(kick_new_ctx, [0.2, 0.1]);
-      //var kick_new = ev.kick(kick_new_ctx, [0.45, 0.25]);
+      //var kick_new = ev.kick(kick_new_ctx, [0.2, 0.1]);
+      var kick_new = ev.kick(kick_new_ctx, [0.45, 0.25]);
       
       function bufferAsync( ctx ) {
         return ctx.startRendering().then( renderedBuffer => {
-            console.log('Rendering completed successfully', renderedBuffer.length);
+            //console.log('Rendering completed successfully', renderedBuffer.length);
             return renderedBuffer;
           }).catch(function(err) {
             console.log('Rendering failed: ' + err);
@@ -73,10 +74,12 @@ var ev = {
 
       function playAsync( offsetTime ) {
         return  renderedBuffer => {
-          var playme = ev.audioContext.createBufferSource();
-          playme.buffer = renderedBuffer;
-          playme.connect(ev.audioContext.destination);
-          playme.start(ev.audioContext.currentTime + offsetTime);
+          if(true){
+            var playme = ev.audioContext.createBufferSource();
+            playme.buffer = renderedBuffer;
+            playme.connect(ev.audioContext.destination);
+            playme.start(ev.audioContext.currentTime + offsetTime);
+          }
           return renderedBuffer;
         };
       }
@@ -101,6 +104,7 @@ var ev = {
           for(var freq=0.0; freq<fft_len/2; freq+=freq_step, freq_step*=1.1) {
             spectrum_overall.push( spectrum[ freq|0 ] || 0.0 );  // indices need to be integer, some spectrum entries 'undefined'
           }
+          spectrum=undefined;
         }
         
         // Find absolute max in signature_overall
@@ -108,7 +112,7 @@ var ev = {
         for(var i=1; i<spectrum_overall.length; i++) {
           max = (spectrum_overall[i]>max)?spectrum_overall[i]:max;
         }
-        console.log("spectrum_overall.max="+max);
+        //console.log("spectrum_overall.max="+max);
         //console.log("spectrum_overall=", spectrum_overall);
         
         // in-place normalization of the signature
@@ -120,6 +124,19 @@ var ev = {
       }
       
       var kick_reg_signature=undefined;
+      
+      function toL2error(signature) {
+        //console.log(sig.length);
+        //var kick_new_signature = sig; 
+        
+        var tot=0.0;
+        for(var i=0; i<signature.length; i++) {
+          var v=signature[i]-kick_reg_signature[i];
+          tot += v*v;
+        }
+        return tot;
+      }
+      
       
       bufferAsync( kick_reg_ctx )
         .then( playAsync(0.0) )
@@ -133,41 +150,56 @@ var ev = {
         })
         .then( playAsync(0.5) )
         .then( toSignature )
-        .then( sig => {
-          //console.log(sig.length);
-          var kick_new_signature = sig; 
-          
-          //return bufferAsync( kick_new_ctx );
-          var tot=0.0;
-          for(var i=0; i<sig.length; i++) {
-            var v=sig[i]-kick_reg_signature[i];
-            tot += v*v;
+        .then( toL2error )
+        .then( l2_error => {
+          console.log("Firstl2 difference", l2_error);
+        })
+        .then( _ => {  // Let's try for a population
+          var pop=[];
+          for(var i=0; i<10; i++) {
+            var params=[];
+            for(var p=0; p<2; p++) {
+              params.push( Math.random() );
+            }
+            pop.push({ score:undefined, params:params });
           }
           
-          console.log("Total l2 difference", tot);
-        })
+          // Now let's evaluate all of them
+          return Promise.all( pop.map( ind => {
+                  var kick_ind_ctx = new OfflineAudioContext(1,sampleRate*max_length_in_secs,sampleRate);        
+                  var kick_ind = ev.kick(kick_ind_ctx, ind.params);
+                  return bufferAsync( kick_ind_ctx )
+                    //.then( playAsync(0.5) )
+                    .then( toSignature )
+                    .then( toL2error );
+                    
+                }) // End of map
+            )
+            .then( pop_scores => {
+              pop_scores.forEach( (s, i) => {
+                  pop[i].score = s;
+                }); 
+                
+              //console.log(pop);
+              
+              // find best (lowest L2) score in the population
+              var best = pop.slice(1).reduce( (acc, ind) => { // don't need to consider first one
+                  return (ind.score < acc.score) ? ind : acc;
+                }, pop[0]); // since it's already here...
+              
+              console.log(best);
+              
+              var kick_ind_ctx = new OfflineAudioContext(1,sampleRate*max_length_in_secs,sampleRate);        
+              var kick_ind = ev.kick(kick_ind_ctx, best.params);
+              return bufferAsync( kick_ind_ctx )
+                .then( playAsync(1.0) );
+            })
+            ;  
+            
+        });
         ;
         
-/*        
-        .then( buf => {
-            console.log(buf);
-            var data = buf.getChannelData(0);
-            
-            var spectrum_overall=[];
-            var offset_step = 32;
-            for(var window_offset=0; window_offset+fft_len<buf.length; window_offset+=offset_step, offset_step*=2) {
-              fft.forward( data.slice(window_offset, window_offset+fft_len) );
-              var spectrum = fft.spectrum;
-              //console.log(spectrum);
-              
-              for(var freq=0, freq<fft_len; freq+=freq_step, freq_step*=1.1) {
-                spectrum_overall.push( spectrum[ freq|0 ] );
-              }
-            }
-            return spectrum_overall;
-          });
-*/        
-      //bufferAsync( kick_reg_ctx ).then( playAsync );
+
     },
     
   kick: (ac, params) => {
