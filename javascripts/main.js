@@ -1,6 +1,6 @@
 window.onload = function() {
   window.AudioContext = window.AudioContext || window.webkitAudioContext;
-
+  
   var audioContext = new AudioContext();
   var futureTickTime = audioContext.currentTime;
   var current16thNote = 1;
@@ -11,6 +11,11 @@ window.onload = function() {
   var filterGain = audioContext.createGain();
   mixGain.connect(audioContext.destination);
   mixGain.gain.value = 0;
+  
+  if(ev) {
+    ev.init(audioContext);
+  }
+
   var slider = document.getElementById("myRange");
   var delaySlider = document.getElementById("delaySlider");
   var startBtn = document.getElementById("startBtn");
